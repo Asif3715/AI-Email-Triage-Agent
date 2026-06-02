@@ -1,0 +1,179 @@
+% AI Email Triage Agent — Workflow Automation Case Study
+% Compile: pdflatex case-study.tex
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{parskip}
+
+% Renders image if file exists; otherwise shows a labeled placeholder box.
+\newcommand{\optionalimage}[2][0.92\textwidth]{%
+  \IfFileExists{#2}{%
+    \includegraphics[width=#1]{#2}%
+  }{%
+    \fbox{\parbox[c][4.5cm][c]{#1}{\centering\textit{Add \texttt{#2} to this folder}}}%
+  }%
+}
+
+\newcommand{\screenshot}[3][0.9\textwidth]{%
+  \begin{figure}[htbp]
+    \centering
+    \optionalimage[#1]{#2}
+    \caption{#3}
+  \end{figure}
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  citecolor=black
+}
+
+\title{\textbf{Workflow Automation Case Study}\\[0.4em]
+\large AI Email Triage Agent for University Student Services}
+\author{Asif Khan}
+\date{June 2026}
+
+\begin{document}
+
+\maketitle
+
+% ---------------------------------------------------------------------------
+\section*{Try the Agent}
+% ---------------------------------------------------------------------------
+
+\begin{itemize}[leftmargin=*, nosep]
+  \item \textbf{Live agent (email):} Send a message to \href{mailto:asifbot3715@gmail.com}{asifbot3715@gmail.com}.
+        The agent will classify your request and reply automatically, ask for missing information, or escalate to a human when needed.
+        Allow up to one minute for a response (the inbox is polled every minute).
+  \item \textbf{Operations dashboard:} \url{<PASTE\_YOUR\_DASHBOARD\_URL\_HERE>}
+\end{itemize}
+
+\vspace{0.5em}
+\noindent\textit{Note: This project was built in a single day before the 3 June 2026 deadline. Scope was intentionally kept simple: a working end-to-end agent with deployment, audit logging, and escalation---not a production-hardened system.}
+
+% ---------------------------------------------------------------------------
+\section{Why This Problem?}
+% ---------------------------------------------------------------------------
+
+University student-services teams receive a high volume of repetitive email: transcript requests, fee questions, registration issues, password resets, and general inquiries. Much of this work is \emph{data-heavy} (student ID, course codes, deadlines) yet still handled manually---staff read each message, decide urgency, reply or forward, and log outcomes in spreadsheets or ticketing tools. That repetition consumes real time and delays students who need quick answers.
+
+This maps directly to the \textbf{Intake Triage Bot} pattern from the brief: classify incoming requests, gather missing information through conversation, and route complex cases to the right person with full context.
+
+% ---------------------------------------------------------------------------
+\section{Why I Picked This Workflow}
+% ---------------------------------------------------------------------------
+
+With the application deadline on 3 June 2026, I had roughly \textbf{one day} to design, build, test, and deploy a working agent. I chose email triage because:
+
+\begin{itemize}[nosep]
+  \item It is a \textbf{real} workflow I have seen in education settings, not a toy demo.
+  \item The user interaction model is familiar (email in, email out) and easy for reviewers to test.
+  \item I could ship an autonomous loop without renting a server, by using \textbf{Google Apps Script} for Gmail, scheduling, and API access.
+  \item The branching logic (reply / clarify / escalate) is enough to show agentic behavior within a tight time budget.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Who Is the User?}
+% ---------------------------------------------------------------------------
+
+\textbf{Primary user:} A student emailing the student-services inbox with a question or request.
+
+\textbf{Secondary user:} A staff member or intern monitoring the queue on a \textbf{live dashboard} and handling \textbf{escalated} cases forwarded by email.
+
+\textbf{When and how:} Students send email at any time; the agent runs on a one-minute schedule. Staff use the dashboard during office hours to see what was processed, what failed, and what needs human follow-up.
+
+% ---------------------------------------------------------------------------
+\section{Architecture}
+% ---------------------------------------------------------------------------
+
+\subsection*{How the Agent Works}
+
+\begin{enumerate}[nosep]
+  \item A \textbf{time trigger} (every 1 minute) runs \texttt{pollInbox} in Google Apps Script.
+  \item Unread inbox messages are fetched (with deduplication by Gmail message ID and thread labels).
+  \item Message content and \textbf{thread history} are sent to \textbf{Groq} (\texttt{llama3-70b-8192}) with a fixed JSON schema.
+  \item The agent chooses an action and executes it via Gmail; every step is logged to \textbf{Google Sheets}.
+  \item A \textbf{React dashboard} polls the Apps Script web app every 5 seconds for live status.
+\end{enumerate}
+
+\subsection*{Autonomous Decisions vs.\ Escalation}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Decision} & \textbf{When} \\
+\midrule
+\texttt{auto\_reply} & High-confidence, routine inquiry; agent sends a direct answer \\
+\texttt{clarify}     & Required information missing (e.g.\ student ID); agent asks one question; thread stays open \\
+\texttt{escalate}    & Low confidence, urgent keywords, or out-of-scope; student gets acknowledgment; staff notified \\
+\bottomrule
+\end{tabular}
+\endcenter
+
+\subsection*{Failure Handling}
+
+\begin{itemize}[nosep]
+  \item Invalid or failed Groq responses $\rightarrow$ email marked \texttt{failed}, generic fallback reply sent, thread labeled to avoid infinite retries.
+  \item Gmail daily send quota exceeded $\rightarrow$ processing stops gracefully; errors visible in Apps Script execution logs.
+  \item Ambiguous or off-topic input $\rightarrow$ model prompted to escalate rather than guess.
+  \item Multi-turn clarify flows $\rightarrow$ follow-up replies in the same thread are processed with full conversation context.
+\end{itemize}
+
+\subsection*{Architecture Diagram}
+
+\begin{figure}[htbp]
+  \centering
+  \optionalimage{arch.png}
+  \caption{System architecture: Gmail $\rightarrow$ Apps Script agent $\rightarrow$ Groq / Sheets / replies; React dashboard reads from Apps Script API.}
+  \label{fig:architecture}
+\end{figure}
+
+\subsection*{Technology Stack}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Layer} & \textbf{Technology} \\
+\midrule
+Ingestion \& actions & Google Apps Script (\texttt{GmailApp}) \\
+LLM classification  & Groq API (\texttt{llama3-70b-8192}) \\
+Audit log           & Google Sheets \\
+Monitoring UI       & Vite, React, Tailwind CSS \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ---------------------------------------------------------------------------
+\section{Screenshots}
+% ---------------------------------------------------------------------------
+
+\noindent Place \texttt{sc1.png}--\texttt{sc4.png} in the same folder as this \texttt{.tex} file before compiling.
+
+\screenshot{sc1.png}{Dashboard overview: live queue, status counts, and email list.}
+
+\screenshot{sc2.png}{Email detail modal: intent, confidence, reply sent, and extracted entities.}
+
+\screenshot{sc3.png}{Gmail thread showing agent auto-reply, clarify question, or escalation acknowledgment.}
+
+\screenshot{sc4.png}{Google Sheets audit log with processed rows and Groq response data.}
+
+% ---------------------------------------------------------------------------
+\section{What I Learned}
+% ---------------------------------------------------------------------------
+
+\begin{itemize}[nosep]
+  \item \textbf{Agent design is state + policy:} Labeling threads, tracking message IDs, and keeping clarify threads open matter as much as the prompt.
+  \item \textbf{Serverless can ship fast:} Apps Script removed the need for a backend deployment while still supporting Gmail actions and a JSON API.
+  \item \textbf{Quotas are real constraints:} Gmail send limits and Groq rate limits forced better deduplication and careful testing.
+  \item \textbf{Escalation is a feature:} Knowing when \emph{not} to auto-reply is what makes the agent trustworthy for a demo inbox.
+  \item \textbf{Observability helps demos:} A live dashboard plus a Sheet audit trail made debugging and presentation much easier under time pressure.
+\end{itemize}
+
+\end{document}
