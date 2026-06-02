@@ -1,160 +1,292 @@
 # AI Email Triage Agent
 
-Monitors Gmail, classifies incoming emails with Groq, writes results to Google Sheets, and shows a live React dashboard.
+An end-to-end email triage system for a university student-services inbox. Incoming Gmail messages are classified with Groq, acted on automatically (reply, clarify, or escalate), logged to Google Sheets, and monitored through a React dashboard.
 
-Built as a one-day MVP for an internship demo: end-to-end agent loop on Google Apps Script with no separate backend server.
+Built as a lightweight MVP: no dedicated backend server—Gmail, scheduling, LLM calls, and the read API all run in **Google Apps Script**.
 
-## Layout
+---
 
-- `apps-script/` — Google Apps Script backend (Gmail, Groq, Sheets, web API)
-- `frontend/` — Vite + React dashboard
-- `DEMO.md` — sample emails to send during a live demo
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Project Structure](#project-structure)
+- [Setup](#setup)
+- [Configuration](#configuration)
+- [Running the Dashboard](#running-the-dashboard)
+- [Demo](#demo)
+- [API](#api)
+- [Testing](#testing)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [Updating Apps Script](#updating-apps-script)
+
+---
+
+## Overview
+
+| Component | Technology |
+|-----------|------------|
+| Email ingestion & actions | Google Apps Script (`GmailApp`) |
+| Classification | Groq API (`llama3-70b-8192`) |
+| Audit log | Google Sheets |
+| Dashboard | Vite, React, Tailwind CSS |
+
+The agent runs on a **one-minute time trigger**, processes unread inbox messages, and applies one of three actions:
+
+| Action | Behavior |
+|--------|----------|
+| `auto_reply` | Sends a direct answer to the sender |
+| `clarify` | Asks for missing information; thread stays open for follow-ups |
+| `escalate` | Acknowledges the sender and notifies a human support address |
+
+---
+
+## Features
+
+- Automated triage with structured JSON output from the LLM
+- Full audit trail in Google Sheets (intent, entities, confidence, raw model response)
+- Live dashboard with status filters and email detail modal
+- Thread-aware processing for multi-message conversations (e.g. clarify → user reply)
+- Per-message deduplication via stored Gmail message IDs
+- Frontend unit tests for triage rules and dashboard statistics
+
+---
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-  subgraph backend [Apps Script]
-    Trigger[1min trigger]
-    Poll[pollInbox]
-    Groq[Groq LLM]
-    Sheet[Google Sheets]
-    # ✉️ AI Email Triage Agent
+flowchart TB
+  subgraph trigger [Scheduler]
+    T[Time trigger every 1 min]
+  end
 
-    ![status](https://img.shields.io/badge/status-Prototype-yellow)
-    ![version](https://img.shields.io/badge/version-1.0.0-blue)
-    ![license](https://img.shields.io/badge/license-MIT-green)
-    ![frontend](https://img.shields.io/badge/frontend-Vite%2BReact-purple)
-    ![backend](https://img.shields.io/badge/backend-Apps%20Script-red)
+  subgraph appsScript [Google Apps Script]
+    P[pollInbox]
+    G[Groq API]
+    S[Google Sheets]
+    M[Gmail reply / escalate]
+    API[doGet web app]
+    T --> P
+    P --> G
+    P --> S
+    P --> M
+    API --> S
+  end
 
-    A lightweight, demo-grade agent that polls Gmail, classifies incoming messages using an LLM (Groq), logs results to Google Sheets, and exposes a small React dashboard for live monitoring.
+  subgraph client [Frontend]
+    D[React dashboard]
+    D -->|GET every 5s| API
+  end
 
-    Why this repo exists: a fast, end-to-end MVP that demonstrates an automated triage loop without a separate server—ideal for demos and experiments.
+  Inbox[(Gmail Inbox)] --> P
+  M --> Inbox
+```
 
-    ## Table of Contents
-    - [Features](#features)
-    - [Quick Start](#quick-start)
-    - [Architecture](#architecture)
-    - [Configuration](#configuration)
-    - [Development](#development)
-    - [Demo & Testing](#demo--testing)
-    - [Limitations & Production Checklist](#limitations--production-checklist)
-    - [Contributing](#contributing)
-    - [License](#license)
+---
 
-    ## Features
-    - ⚡ Automated triage: auto-reply, clarify, or escalate decisions
-    - 📝 Persisted audit: every processed email is written to Google Sheets
-    - 🧭 Live dashboard: Vite + React frontend polling an Apps Script JSON endpoint
-    - 🔒 Minimal surface for quick demos; easily extendable for production hardening
+## How It Works
 
-    ## Quick Start
-    # ✉️ AI Email Triage Agent
+1. **Poll** — `pollInbox` searches for unread inbox messages within the configured lookback window (excluding threads labeled `ai-triaged`).
+2. **Classify** — Message content and thread history are sent to Groq with a fixed JSON schema.
+3. **Act** — The script replies, asks a clarifying question, or escalates to `HUMAN_SUPPORT_EMAIL`.
+4. **Log** — A row is appended to the `emails` sheet with status and model output.
+5. **Close or continue** — After `auto_reply` or `escalate`, the thread is labeled `ai-triaged`. After `clarify`, only the message is marked read so follow-up replies can be processed.
 
-    ![status](https://img.shields.io/badge/status-Prototype-yellow)
-    ![version](https://img.shields.io/badge/version-1.0.0-blue)
-    ![license](https://img.shields.io/badge/license-MIT-green)
-    ![frontend](https://img.shields.io/badge/frontend-Vite%2BReact-purple)
-    ![backend](https://img.shields.io/badge/backend-Apps%20Script-red)
+---
 
-    A lightweight, demo-grade agent that polls Gmail, classifies incoming messages using an LLM (Groq), logs results to Google Sheets, and exposes a small React dashboard for live monitoring.
+## Prerequisites
 
-    Why this repo exists: a fast, end-to-end MVP that demonstrates an automated triage loop without a separate server—ideal for demos and experiments.
+- A Google account with Gmail and Google Sheets
+- A [Groq](https://console.groq.com/) API key
+- Node.js 18+ (for the frontend only)
+- Google Apps Script project (paste code from `apps-script/Code.gs`)
 
-    ## Table of Contents
-    - [Features](#features)
-    - [Quick Start](#quick-start)
-    - [Architecture](#architecture)
-    - [Configuration](#configuration)
-    - [Development](#development)
-    - [Demo & Testing](#demo--testing)
-    - [Limitations & Production Checklist](#limitations--production-checklist)
-    - [Contributing](#contributing)
-    - [License](#license)
+---
 
-    ## Features
-    - ⚡ Automated triage: auto-reply, clarify, or escalate decisions
-    - 📝 Persisted audit: every processed email is written to Google Sheets
-    - 🧭 Live dashboard: Vite + React frontend polling an Apps Script JSON endpoint
-    - 🔒 Minimal surface for quick demos; easily extendable for production hardening
+## Project Structure
 
-    ## Quick Start
-    1. Create or choose a Google Sheet and note its ID.
-    2. Open `apps-script/Code.gs` in the Google Apps Script editor and set Script Properties (see Configuration below).
-    3. Deploy the Apps Script web app and copy the deployment URL.
-    4. Set `VITE_APPS_SCRIPT_URL` in `frontend/.env` and run the frontend:
+```
+emailagentproject/
+├── apps-script/
+│   └── Code.gs              # Backend: poll, Groq, Gmail, Sheets, doGet
+├── frontend/
+│   ├── src/
+│   │   ├── components/      # Dashboard UI
+│   │   ├── hooks/           # Polling hook
+│   │   ├── lib/             # Triage helpers + Vitest tests
+│   │   └── services/        # Apps Script API client
+│   └── package.json
+├── DEMO.md                  # Sample emails for live demos
+└── README.md
+```
 
-    ```bash
-    cd frontend
-    npm install
-    npm run dev
-    ```
+---
 
-    For production builds:
+## Setup
 
-    ```bash
-    npm run build
-    ```
+### 1. Google Sheet
 
+Create a spreadsheet and copy its ID from the URL:
 
+`https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit`
 
-    ## Configuration
-    Required script properties (set in Apps Script Project Settings):
+**Important:** `setupSheet()` in Apps Script creates a **new** spreadsheet each time it runs. For an existing sheet, add the `emails` tab manually with the column headers defined in `Code.gs`, or run `setupSheet()` once and then set `SPREADSHEET_ID` to the ID it logs.
 
-    - `GROQ_API_KEY` — Groq API key
-    - `SPREADSHEET_ID` — target Google Sheet ID
-    - `HUMAN_SUPPORT_EMAIL` — escalation recipient
-    - `POLL_LOOKBACK_MINUTES` — optional (default 10)
+### 2. Apps Script
 
-    Frontend environment:
+1. Go to [script.google.com](https://script.google.com) and create a project.
+2. Replace the default code with [`apps-script/Code.gs`](apps-script/Code.gs).
+3. Open **Project settings → Script properties** and add the variables in [Configuration](#configuration).
+4. Run **`setupTrigger()`** once to install the minute-based trigger.  
+   Do not run `setupTrigger()` repeatedly unless you intend to reset triggers (it deletes all existing project triggers first).
 
-    Create `frontend/.env` with:
+### 3. Deploy the web app
 
-    ```env
-    VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/your-deployment-id/exec
-    ```
+1. **Deploy → New deployment → Web app**
+2. Execute as: **Me**
+3. Who has access: **Anyone** (required for the dashboard URL in this MVP)
+4. Copy the deployment URL for the frontend.
 
-    Notes:
-    - Do not commit `.env` files or secrets.
-    - Apps Script reads from Script Properties, not `.env`.
+After code changes, update the deployment to a **new version** (see [Updating Apps Script](#updating-apps-script)).
 
-    ## Development
+### 4. Frontend
 
-    Frontend commands:
+```bash
+cd frontend
+cp .env.example .env      # then edit .env
+npm install
+npm run dev
+```
 
-    ```bash
-    cd frontend
-    npm install
-    npm run dev   # local dev server
-    npm run build # production build
-    npm test      # run unit tests (Vitest)
-    ```
+Set `VITE_APPS_SCRIPT_URL` in `frontend/.env` to the web app URL from step 3.
 
-    Source layout (quick):
-    - `apps-script/` — Apps Script code (`Code.gs`)
-    - `frontend/` — Vite + React app
-    - `frontend/src/lib/` — triage helpers and tests
+---
 
-    ## Demo & Testing
-    - See `DEMO.md` for example emails to send for each triage outcome.
-    - Tests: `frontend/src/lib/*.test.js` run under Vitest.
+## Configuration
 
-    ## Limitations & Production Checklist
-    This project is a demo MVP. Before using in production consider:
+### Apps Script (Script properties)
 
-    - Add authentication to the Apps Script `doGet` endpoint
-    - Use Gmail push notifications or Pub/Sub instead of frequent polling
-    - Add server-side validation and idempotency guarantees
-    - Introduce human approval workflows for outbound replies
-    - Harden prompts and sanitize inputs to reduce prompt-injection risks
+| Property | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | Yes | Groq API key |
+| `SPREADSHEET_ID` | Yes | Target Google Sheet ID |
+| `HUMAN_SUPPORT_EMAIL` | Recommended | Recipient for escalation notifications |
+| `POLL_LOOKBACK_MINUTES` | No | How far back to search for unread mail (default: `10`) |
 
-    ## Contributing
-    - Open an issue for feature requests or bugs.
-    - Create PRs against `main` with focused changes and tests where applicable.
+Apps Script does **not** read `.env` files. Values must be set in the Apps Script UI.
 
-    ## License
-    This project is provided under the MIT license. See the `LICENSE` file for details.
+### Frontend (`frontend/.env`)
 
-    ---
+```env
+VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+```
 
-    If you'd like, I can also add a small demo GIF or SVG screenshot placeholder, tighten the badges to reference a real GitHub repo, or add a short troubleshooting table copied from the previous README. Which would you prefer next?
+Never commit `frontend/.env`. Do not prefix `GROQ_API_KEY` with `VITE_` or it may be bundled into the client build.
+
+Reference: [`frontend/.env.example`](frontend/.env.example)
+
+---
+
+## Running the Dashboard
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Local development server |
+| `npm run build` | Production build (`frontend/dist/`) |
+| `npm run preview` | Preview production build |
+| `npm test` | Run Vitest unit tests |
+
+Deploy `frontend/` to any static host (e.g. Vercel). Set `VITE_APPS_SCRIPT_URL` at **build time**.
+
+---
+
+## Demo
+
+See [DEMO.md](DEMO.md) for three sample messages (auto-reply, clarify, escalate) and how to verify results in the dashboard and spreadsheet.
+
+**Clarify follow-up:** Reply in the same thread with the requested information. The agent processes each unread message separately and sends the full thread to Groq for context.
+
+---
+
+## API
+
+The deployed web app exposes:
+
+| Request | Response |
+|---------|----------|
+| `GET ?action=list` (default) | `{ updatedAt, rows }` — all rows from the `emails` sheet |
+| `GET ?action=health` | `{ ok: true, timestamp }` |
+
+There is no authentication on this endpoint in the MVP. Treat the deployment URL as sensitive.
+
+---
+
+## Testing
+
+```bash
+cd frontend
+npm test
+```
+
+Tests cover:
+
+- `frontend/src/lib/triageRules.js` — decision normalization (e.g. low confidence → escalate)
+- `frontend/src/lib/emailStats.js` — dashboard stat aggregation
+
+Apps Script itself is validated manually via **Executions** in the Apps Script editor and test emails.
+
+---
+
+## Known Limitations
+
+This project is intended for **demos and personal test inboxes**, not production use with real student PII without further hardening.
+
+| Area | Limitation |
+|------|------------|
+| Security | Public `doGet` endpoint; no API token |
+| Trust model | Triage rules are primarily in the LLM prompt; Apps Script does not fully re-validate before send |
+| Prompt injection | Raw email bodies are passed to the model |
+| Delivery | Time-based polling, not Gmail push notifications |
+| Concurrency | No `LockService`; overlapping triggers may rarely double-process |
+| Quotas | Gmail send limits apply (~100/day for typical consumer accounts via Apps Script) |
+
+**Production checklist:** authenticate `doGet`, enforce policy in code, add idempotency, use push notifications, human-in-the-loop before outbound mail, and restrict deployment access.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | What to do |
+|---------|----------------|------------|
+| Dashboard empty, no error banner | Missing `VITE_APPS_SCRIPT_URL` | Create `frontend/.env`, restart `npm run dev` |
+| “Failed to load emails” | Bad URL, revoked deployment, or network | Redeploy web app; update URL; check browser network tab |
+| Emails never process | Trigger not installed | Run `setupTrigger()` once; check **Triggers** in Apps Script |
+| Groq / `failed` status | Invalid key, quota, or model name | Verify `GROQ_API_KEY` and model in `Code.gs` |
+| Follow-up after clarify ignored | Thread labeled `ai-triaged` from older code | Remove `ai-triaged` label in Gmail; deploy latest `Code.gs` |
+| `Service invoked too many times for one day: email` | Gmail daily send quota exceeded | Wait for quota reset; disable trigger while debugging; avoid repeated `pollInbox` runs |
+| Duplicate rows or replies | Testing before dedupe / failure fixes | Mark test threads read; remove `ai-triaged`; use latest `Code.gs` |
+
+**Manual test:** In Apps Script, run `pollInbox()` once and inspect **Executions** for errors.
+
+---
+
+## Updating Apps Script
+
+| Change type | Action |
+|-------------|--------|
+| Backend logic (`pollInbox`, Groq, Gmail) | Save in editor — trigger uses latest code automatically |
+| Dashboard API (`doGet`) | **Deploy → Manage deployments → Edit → New version → Deploy** |
+| `setupSheet()` | Only run when creating a new spreadsheet |
+| `setupTrigger()` | Only run if the minute trigger is missing |
+
+You usually do **not** need a new deployment URL after updating an existing web app deployment.
+
+---
+
+## License
+
+Add a license file if you plan to open-source this repository. Until then, all rights reserved by the author.
