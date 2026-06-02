@@ -49,6 +49,36 @@ flowchart LR
     - 🔒 Minimal surface for quick demos; easily extendable for production hardening
 
     ## Quick Start
+    # ✉️ AI Email Triage Agent
+
+    ![status](https://img.shields.io/badge/status-Prototype-yellow)
+    ![version](https://img.shields.io/badge/version-1.0.0-blue)
+    ![license](https://img.shields.io/badge/license-MIT-green)
+    ![frontend](https://img.shields.io/badge/frontend-Vite%2BReact-purple)
+    ![backend](https://img.shields.io/badge/backend-Apps%20Script-red)
+
+    A lightweight, demo-grade agent that polls Gmail, classifies incoming messages using an LLM (Groq), logs results to Google Sheets, and exposes a small React dashboard for live monitoring.
+
+    Why this repo exists: a fast, end-to-end MVP that demonstrates an automated triage loop without a separate server—ideal for demos and experiments.
+
+    ## Table of Contents
+    - [Features](#features)
+    - [Quick Start](#quick-start)
+    - [Architecture](#architecture)
+    - [Configuration](#configuration)
+    - [Development](#development)
+    - [Demo & Testing](#demo--testing)
+    - [Limitations & Production Checklist](#limitations--production-checklist)
+    - [Contributing](#contributing)
+    - [License](#license)
+
+    ## Features
+    - ⚡ Automated triage: auto-reply, clarify, or escalate decisions
+    - 📝 Persisted audit: every processed email is written to Google Sheets
+    - 🧭 Live dashboard: Vite + React frontend polling an Apps Script JSON endpoint
+    - 🔒 Minimal surface for quick demos; easily extendable for production hardening
+
+    ## Quick Start
     1. Create or choose a Google Sheet and note its ID.
     2. Open `apps-script/Code.gs` in the Google Apps Script editor and set Script Properties (see Configuration below).
     3. Deploy the Apps Script web app and copy the deployment URL.
@@ -67,6 +97,26 @@ flowchart LR
     ```
 
     ## Architecture
+
+    ```mermaid
+    flowchart LR
+      subgraph backend [Apps Script]
+        Trigger[1min trigger]
+        Poll[pollInbox]
+        Groq[Groq LLM]
+        Sheet[Google Sheets]
+        Gmail[Gmail reply]
+        API[doGet JSON]
+        Trigger --> Poll --> Groq
+        Poll --> Sheet
+        Poll --> Gmail
+        API --> Sheet
+      end
+      subgraph ui [React Dashboard]
+        React[Vite + React]
+        React -->|poll 5s| API
+      end
+    ```
 
     Backend: Google Apps Script (poll Gmail, call Groq, write to Sheets, serve JSON).
 
