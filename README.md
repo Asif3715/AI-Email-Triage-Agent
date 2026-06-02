@@ -96,33 +96,7 @@ flowchart LR
     npm run build
     ```
 
-    ## Architecture
 
-    ```mermaid
-    flowchart LR
-      subgraph backend [Apps Script]
-        Trigger[1min trigger]
-        Poll[pollInbox]
-        Groq[Groq LLM]
-        Sheet[Google Sheets]
-        Gmail[Gmail reply]
-        API[doGet JSON]
-        Trigger --> Poll --> Groq
-        Poll --> Sheet
-        Poll --> Gmail
-        API --> Sheet
-      end
-      subgraph ui [React Dashboard]
-        React[Vite + React]
-        React -->|poll 5s| API
-      end
-    ```
-
-    Backend: Google Apps Script (poll Gmail, call Groq, write to Sheets, serve JSON).
-
-    Frontend: Vite + React dashboard that polls the Apps Script `doGet` endpoint.
-
-    Flow: scheduled trigger → poll unread messages → LLM classification → write row to Sheets → optional auto-reply / escalation → dashboard polls for updates.
 
     ## Configuration
     Required script properties (set in Apps Script Project Settings):
