@@ -37,6 +37,8 @@ Thanks
 
 **Expected behavior:** `action` = `clarify`. The agent sends only a clarifying question (e.g. student ID, term, amount). Check `reply_sent` in the dashboard modal.
 
+**Follow-up:** Reply in the same thread with your student ID. The agent should process that as a new unread message (thread stays open until `auto_reply` or `escalate`). You should see a second row in the dashboard.
+
 ---
 
 ## 3. Escalate (urgent or low confidence)

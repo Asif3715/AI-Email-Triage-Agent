@@ -85,49 +85,97 @@ function pollInbox() {
   const config = requireConfig();
   const label = getOrCreateLabel();
   const lookback = config.pollLookbackMinutes;
+  const processedIds = getProcessedEmailIds();
   const query = `in:inbox is:unread newer_than:${lookback}m -label:${PROCESSED_LABEL}`;
   const threads = GmailApp.search(query, 0, 20);
 
   threads.forEach((thread) => {
+    if (thread.getLabels().some((item) => item.getName() === PROCESSED_LABEL)) return;
+
     const messages = thread.getMessages();
     messages.forEach((message) => {
       if (message.isInChats()) return;
-      if (message.getThread().getLabels().some((item) => item.getName() === PROCESSED_LABEL)) return;
-      processMessage(message, label);
+      if (!message.isUnread()) return;
+      const messageId = String(message.getId());
+      if (processedIds[messageId]) return;
+      processMessage(message, label, processedIds);
     });
   });
 }
 
-function processMessage(message, processedLabel) {
+function getProcessedEmailIds() {
+  const sheet = getEmailsSheet();
+  const lastRow = sheet.getLastRow();
+  const ids = {};
+  if (lastRow < 2) return ids;
+
+  const values = sheet.getRange(2, 12, lastRow, 12).getValues();
+  values.forEach((row) => {
+    if (row[0]) ids[String(row[0])] = true;
+  });
+  return ids;
+}
+
+function processMessage(message, processedLabel, processedIds) {
+  const messageId = String(message.getId());
+  if (processedIds && processedIds[messageId]) return;
+  if (processedIds) processedIds[messageId] = true;
+
   const rowIndex = addToSheet(message, 'received');
   try {
     updateSheetStatus(rowIndex, 'processing');
-    const emailData = {
-      from: message.getFrom(),
-      subject: message.getSubject() || '',
-      body: message.getPlainBody() || '',
-      timestamp: new Date().toISOString(),
-      emailId: message.getId(),
-      threadId: message.getThread().getId(),
-    };
+    const emailData = buildEmailData(message);
 
     const decision = callGroqAPI(emailData);
     updateSheetRow(rowIndex, decision, emailData);
     sendReply(message, decision);
     updateSheetStatus(rowIndex, 'completed');
-    markThreadProcessed(message, processedLabel);
+    const closeThread = decision.action !== 'clarify';
+    markThreadProcessed(message, processedLabel, closeThread);
   } catch (error) {
     updateSheetStatus(rowIndex, 'failed');
     safeSendFailure(message, error);
-    markThreadProcessed(message, processedLabel);
+    markThreadProcessed(message, processedLabel, true);
     Logger.log(error.toString());
   }
 }
 
-function markThreadProcessed(message, processedLabel) {
+function buildEmailData(message) {
+  const thread = message.getThread();
+  const threadMessages = thread.getMessages();
+  const currentId = String(message.getId());
+  const transcript = threadMessages
+    .map((m, idx) => {
+      const marker = String(m.getId()) === currentId ? ' [CURRENT — reply to this]' : '';
+      return (
+        '--- Message ' +
+        (idx + 1) +
+        marker +
+        ' ---\nFrom: ' +
+        m.getFrom() +
+        '\n' +
+        (m.getPlainBody() || '')
+      );
+    })
+    .join('\n\n');
+
+  return {
+    from: message.getFrom(),
+    subject: message.getSubject() || '',
+    body: message.getPlainBody() || '',
+    threadTranscript: transcript,
+    timestamp: new Date().toISOString(),
+    emailId: message.getId(),
+    threadId: thread.getId(),
+  };
+}
+
+function markThreadProcessed(message, processedLabel, closeThread) {
   try {
-    processedLabel.addToThread(message.getThread());
     message.markRead();
+    if (closeThread) {
+      processedLabel.addToThread(message.getThread());
+    }
   } catch (e) {
     Logger.log('Failed to mark thread processed: ' + e.toString());
   }
@@ -157,10 +205,18 @@ Return ONLY valid JSON in this exact format:
 Rules:
 - If confidence < 70, set action = "escalate"
 - If action = "clarify", reply_text must contain only the question
+- If the thread shows you already asked for information and the user replied with it, do not ask again — use auto_reply or escalate
 - If urgent keywords appear, prefer escalate
 - Keep reply_text concise and professional`;
 
-  const userPrompt = `Subject: ${emailData.subject}\nFrom: ${emailData.from}\nBody: ${emailData.body}`;
+  const userPrompt = [
+    'Subject: ' + emailData.subject,
+    'From: ' + emailData.from,
+    'Thread history (oldest to newest):',
+    emailData.threadTranscript || emailData.body,
+    '',
+    'Process only the message marked [CURRENT — reply to this]. Use earlier messages for context.',
+  ].join('\n');
 
   const payload = {
     model: GROQ_MODEL,

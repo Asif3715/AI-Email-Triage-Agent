@@ -151,6 +151,7 @@ For production you would add: API token on `doGet`, server-side policy checks, i
 | Emails never process | Trigger not installed | Run `setupTrigger()` once; check Triggers in Apps Script |
 | Groq errors / `failed` status | Invalid key, quota, or deprecated model | Verify `GROQ_API_KEY`; check Groq dashboard and model name in `Code.gs` |
 | Duplicate failure replies | Old behavior before failure labeling fix | Ensure latest `Code.gs` labels threads on failure; mark stuck threads `ai-triaged` manually |
+| Follow-up after clarify ignored | Thread still has `ai-triaged` from older code | Remove the `ai-triaged` label from that Gmail thread once; redeploy latest `Code.gs` (clarify no longer closes the thread) |
 | `setupSheet()` created wrong sheet | Ran setup on existing project | Use one sheet ID in Script Properties; do not re-run `setupSheet()` unless intentional |
 
 ## What the dashboard reads
